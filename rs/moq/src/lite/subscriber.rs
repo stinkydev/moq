@@ -43,12 +43,20 @@ impl<S: web_transport_trait::Session> Subscriber<S> {
 
 	async fn run_uni(self) -> Result<(), Error> {
 		loop {
-			let stream = self
-				.session
-				.accept_uni()
-				.await
-				.map_err(|err| Error::Transport(Arc::new(err)))?;
-
+			let stream = match self.session.accept_uni().await {
+				Ok(stream) => stream,
+				Err(err) => {
+					let err_str = err.to_string();
+					// Don't treat stream resets as fatal session errors
+					if err_str.contains("stream reset") || err_str.contains("RESET_STREAM") {
+						tracing::debug!("stream reset in accept_uni (non-fatal): {}", err);
+						continue;
+					}
+					// Other transport errors are fatal
+					return Err(Error::Transport(Arc::new(err)));
+				}
+			};
+			
 			let stream = Reader::new(stream);
 			let this = self.clone();
 
